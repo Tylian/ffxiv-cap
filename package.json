@@ -1,0 +1,16 @@
+{
+  "name": "ffxiv-cap",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Tylian",
+  "license": "MIT",
+  "dependencies": {
+    "cap": "^0.1.2",
+    "csv-parse": "^1.2.3",
+    "printf": "^0.2.5"
+  }
+}
