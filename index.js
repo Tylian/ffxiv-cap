@@ -3,9 +3,10 @@ const EXD = require('./lib/EXD');
 const Capture = require('./lib/Capture');
 const FFXIV = require('./lib/FFXIV');
 
-const DEBUG = false;
+const LOG_TRAFFIC = false;
+const LOG_
 
-let EffectType = ["none", "damage", "healing", "addStatus", "resistStatus", "unaffectStatus", "gainGauge", "gainTP", "gainMP", "enmity"];
+let EffectType = ["none", "damage", "healing", "addStatus", "resistStatus", "unaffectStatus", "gainGauge", "gainTP", "gainMP", "enmity", "gainGP"];
 EffectType.forEach((e,i) => { EffectType[e] = i });
 
 function printf(format, ...argv) {
@@ -17,33 +18,35 @@ EXD.getCache('action');
 EXD.getCache('status');
 
 const cap = new Capture('192.168.0.179', 55027);
-cap.on('incoming', async data => {
-	let packet = await FFXIV.parsePacket(data);
+cap.on('incoming', data => {
+	let packet = FFXIV.parsePacket(data);
 	if(packet == undefined) return;
 	for(let segment of packet.segments) {
-		switch(segment.type) {
-			case 0xf10014: // SingleAbility
-				DEBUG && console.log('SingleAbility', segment.data.toString("hex"));
-				var result = await parseAbility(segment.actor, segment.data);
+		if(segment.type != 3) continue;
+		switch(segment.opcode) {
+			case 0x00f1: // SingleAbility
+				printf('SingleAbility %s', segment.data.toString("hex"));
+				var result = parseAbility(segment, segment.data);
 				handleAbility([result])
 				break;
-			case 0xf40014: // AreaAbility
-				DEBUG && console.log('AreaAbility', segment.data.toString("hex"));
-				var result = await parseAreaAbility(segment.actor, segment.data);
-				//handleAbility(result);
+			case 0x00f4: // AreaAbility
+				printf('AreaAbility %s', segment.data.toString("hex"));
+				var result = parseAreaAbility(segment, segment.data);
+				handleAbility(result)
 				break;
 			default:
-				//printf('<- 0x%08x %s', segment.type, segment.data.toString("hex"));
+				DEBUG && printf('<- 0x%04x %s', segment.opcode, segment.data.toString("hex"));
 		}
 	}
 });
-cap.on('outgoing', async data => {
-	let packet = await FFXIV.parsePacket(data);
+cap.on('outgoing', data => {
+	let packet = FFXIV.parsePacket(data);
 	if(packet == undefined) return;
 	for(let segment of packet.segments) {
-		switch(segment.type) {
+		if(segment.type != 3) continue;
+		switch(segment.opcode) {
 			default:
-				//printf('-> 0x%08x %s', segment.type, segment.data.toString("hex"));
+				//DEBUG && printf('-> 0x%04x %s', segment.opcode, segment.data.toString("hex"));
 		}
 	}
 });
@@ -52,12 +55,13 @@ console.log("Ready!");
 
 // ----------------------------------------------------------------------------
 
-async function handleAbility(results) {
+function handleAbility(results) {
 	results.forEach(result => {
 		printf('-- %s @ 0x%08x --', EXD.getValue('action', result.action), result.target, result.actor);
 
 		result.effects.forEach((effect, idx) => {
 			let type = effect.data1 & 0xff;
+			let value = effect.data2 & 0xffff;
 			let effectType = EffectType.none;
 
 			switch(type) {
@@ -68,12 +72,14 @@ async function handleAbility(results) {
 					effectType = EffectType.damage; break;
 				case 4:
 					effectType = EffectType.healing; break
-				case 8: // esuna
+				case 8: // no effect
 					break;
 				case 11:
 					effectType = EffectType.gainMP; break;
 				case 13:
 					effectType = EffectType.gainTP; break;
+				case 14:
+					effectType = EffectType.gainGP; break;
 				case 15:
 				case 16:
 					effectType = EffectType.addStatus; break;
@@ -81,26 +87,25 @@ async function handleAbility(results) {
 					effectType = EffectType.unaffectStatus; break;
 				case 26:
 					effectType = EffectType.enmity; break;
+				case 28: // play animation (?) [data2 = skill id & 0xFFFF]
+					break;
 				case 51:
 					effectType = EffectType.resistStatus; break;
 				case 58: // Gauge update
 					effectType = EffectType.gainGauge; break;
-				case 28: // play animation (?) [data2 = skill id & 0xFFFF]
-					break;
 			}
 
 			switch(effectType) {
 				case EffectType.damage:
 				case EffectType.healing:
-					let amount = effect.data2 & 0xFFFF;
 					if((effect.data2 & 0x4000000) != 0)
-						amount *= 10;
+						value *= 10;
 					
 					let shr = effectType != EffectType.healing ? 8 : 16;
 					let critical = (effect.data1 >>> shr & 0x1) != 0;
 					let direct = (effect.data1 >>> shr & 0x2) != 0;
 
-					if(amount == 0 && type == 1) {
+					if(value == 0 && type == 1) {
 						printf("The attack misses!");
 						break;
 					}
@@ -114,15 +119,14 @@ async function handleAbility(results) {
 						critmsg =` (Critical direct hit!!)`;
 					else if (critical || direct)
 						critmsg =`  (${critical ? "Critical" : "Direct"} hit!)`;
-					if(((effect.data1 >> 24) & 0xff) != 0)
-						critmsg += " (Combo)";
+
+					let bonusPercent = effect.data1 >> 24 & 0xFF;
 					
-					printf("%s %d damage%s", effectType == EffectType.damage ? "Dealt" : "Healed", amount, critmsg);
+					printf("%s %d damage%s (+%d%%)", effectType == EffectType.damage ? "Dealt" : "Healed", value, critmsg, bonusPercent);
 					break;
 				case EffectType.addStatus:
 				case EffectType.resistStatus:
 				case EffectType.unaffectStatus:
-					let status = effect.data2 & 0xffff;
 					const messages = {
 						[EffectType.addStatus]: "Gained status: %s",
 						[EffectType.resistStatus]: "Fully resists status: %s",
@@ -130,13 +134,12 @@ async function handleAbility(results) {
 					};
 					let critRate = (effect.data1 >> 16 & 0xff) / 10;
 					if(critRate < 5 && critRate > 0) critRate += 25.6;
-					printf(messages[effectType] + (critRate > 0 ? " (Critical Rate: %.1f%%)" : ""), EXD.getValue('status', status), critRate);
+					printf(messages[effectType] + (critRate > 0 ? " (Critical Rate: %.1f%%)" : ""), EXD.getValue('status', value), critRate);
 					break;
 				case EffectType.gainGauge:
-					let gaugeType = effect.data2 & 0xFFFF;
 					let gain1 = effect.data1 >> 8 & 0xFF;
 					let gain2 = effect.data1 >> 16 & 0xFF;
-					switch(gaugeType) {
+					switch(value) {
 						case 0xba: // Balance Gauge
 						case 0xbb: // (Manafication??)
 							printf("Gained %d black and %d white mana", gain2, gain1);
@@ -172,9 +175,8 @@ async function handleAbility(results) {
 					break;
 				case EffectType.gainTP:
 				case EffectType.gainMP:
-					let stat = effect.data2 & 0xFFFF;
 					let stats = { [EffectType.gainMP]: "MP", [EffectType.gainTP]: "TP"} 
-					printf("Gained %d %s", stat, stats[effectType]);
+					printf("Gained %d %s", value, stats[effectType]);
 					break;
 			}
 		});
@@ -184,15 +186,6 @@ async function handleAbility(results) {
 			if(effect.data1 != 0 || effect.data2 != 0) printf("[%d] %03d: 0x%08x 0x%08x", i, type, effect.data1, effect.data2);
 		});
 	});
-}
-
-async function parseAreaAbility(actor, data) {
-	let result = {
-		actor: actor,
-		action: data.readUInt16LE(8)
-	};
-
-	printf('-- %s --', EXD.getValue('action', result.action));
 }
 
 function parseEffects(buffer) {
@@ -209,9 +202,28 @@ function parseEffects(buffer) {
 	return effects;
 }
 
-async function parseAbility(actor, data) {
+function parseAreaAbility(segment, data) {
+	let results = [];
+	let targets = data.readUInt16LE(18);
+
+	for(var i = 0; i < targets; i++) {
+		let result = {
+			source: segment.source,
+			action: data.readUInt16LE(8),
+			effects: data.slice(40 + 64 * i, 104 + 64 * i),
+			target:  data.readUInt32LE(552 + i * 8)
+		};
+
+		result.effects = parseEffects(result.effects);
+		results.push(result);
+	}
+	
+	return results;
+}
+
+function parseAbility(segment, data) {
 	let result = {
-		actor: actor,
+		source: segment.source,
 		action: data.readUInt16LE(8),
 		effects: data.slice(40, 106),
 		target: data.readUInt32LE(106),
