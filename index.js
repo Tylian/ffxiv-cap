@@ -3,7 +3,7 @@ const EXD = require('./lib/EXD');
 const Capture = require('./lib/Capture');
 const FFXIV = require('./lib/FFXIV');
 
-const LOG_TRAFFIC = false;
+const LOG_TRAFFIC = true;
 const LOG_ABILITIES = false;
 
 let EffectType = ["none", "damage", "healing", "addStatus", "resistStatus", "unaffectStatus", "gainGauge", "gainTP", "gainMP", "enmity", "gainGP"];
@@ -19,7 +19,7 @@ EXD.getCache('status');
 
 const cap = new Capture('192.168.0.179', 55027);
 cap.on('incoming', data => {
-	let packet = FFXIV.parsePacket(data);
+	let packet = FFXIV.parseContainer(data);
 	if(packet == undefined) return;
 	for(let segment of packet.segments) {
 		if(segment.type != 3) continue;
