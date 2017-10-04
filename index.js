@@ -40,7 +40,7 @@ cap.on('incoming', data => {
 	}
 });
 cap.on('outgoing', data => {
-	let packet = FFXIV.parsePacket(data);
+	let packet = FFXIV.parseContainer(data);
 	if(packet == undefined) return;
 	for(let segment of packet.segments) {
 		if(segment.type != 3) continue;
