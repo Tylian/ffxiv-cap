@@ -4,7 +4,7 @@ const Capture = require('./lib/Capture');
 const FFXIV = require('./lib/FFXIV');
 
 const LOG_TRAFFIC = false;
-const LOG_
+const LOG_ABILITIES = false;
 
 let EffectType = ["none", "damage", "healing", "addStatus", "resistStatus", "unaffectStatus", "gainGauge", "gainTP", "gainMP", "enmity", "gainGP"];
 EffectType.forEach((e,i) => { EffectType[e] = i });
@@ -23,20 +23,20 @@ cap.on('incoming', data => {
 	if(packet == undefined) return;
 	for(let segment of packet.segments) {
 		if(segment.type != 3) continue;
+		LOG_TRAFFIC && printf('<- 0x%04x %s', segment.opcode, segment.data.toString("hex"));
 		switch(segment.opcode) {
 			case 0x00f1: // SingleAbility
-				printf('SingleAbility %s', segment.data.toString("hex"));
+				LOG_ABILITIES && printf('SingleAbility %s', segment.data.toString("hex"));
 				var result = parseAbility(segment, segment.data);
 				handleAbility([result])
 				break;
 			case 0x00f4: // AreaAbility
-				printf('AreaAbility %s', segment.data.toString("hex"));
+				LOG_ABILITIES && printf('AreaAbility %s', segment.data.toString("hex"));
 				var result = parseAreaAbility(segment, segment.data);
 				handleAbility(result)
 				break;
-			default:
-				DEBUG && printf('<- 0x%04x %s', segment.opcode, segment.data.toString("hex"));
 		}
+		
 	}
 });
 cap.on('outgoing', data => {
@@ -44,9 +44,10 @@ cap.on('outgoing', data => {
 	if(packet == undefined) return;
 	for(let segment of packet.segments) {
 		if(segment.type != 3) continue;
+		LOG_TRAFFIC && printf('-> 0x%04x %s', segment.opcode, segment.data.toString("hex"));
 		switch(segment.opcode) {
 			default:
-				//DEBUG && printf('-> 0x%04x %s', segment.opcode, segment.data.toString("hex"));
+				// noop
 		}
 	}
 });
