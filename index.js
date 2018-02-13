@@ -3,8 +3,14 @@ const EXD = require('./lib/EXD');
 const Capture = require('./lib/Capture');
 const FFXIV = require('./lib/FFXIV');
 
-const LOG_TRAFFIC = true;
-const LOG_ABILITIES = false;
+const LOG_TRAFFIC = false;
+const LOG_ABILITIES = true;
+
+const OP_ABILITY_1  = 0x0128;
+const OP_ABILITY_8  = 0x012b;
+const OP_ABILITY_16 = 0x0138;
+const OP_ABILITY_24 = 0x0139;
+const OP_ABILITY_32 = 0x013a;
 
 let EffectType = ["none", "damage", "healing", "addStatus", "resistStatus", "unaffectStatus", "gainGauge", "gainTP", "gainMP", "enmity", "gainGP"];
 EffectType.forEach((e,i) => { EffectType[e] = i });
@@ -17,7 +23,11 @@ console.log('Precaching EXDs...');
 EXD.getCache('action');
 EXD.getCache('status');
 
-const cap = new Capture('192.168.0.179', 55027);
+function parseCStr(buffer) {
+	return buffer.slice(0, buffer.indexOf(0)).toString('utf8');
+}
+
+const cap = new Capture('', [55000, 55999]);
 cap.on('incoming', data => {
 	let packet = FFXIV.parseContainer(data);
 	if(packet == undefined) return;
@@ -25,16 +35,22 @@ cap.on('incoming', data => {
 		if(segment.type != 3) continue;
 		LOG_TRAFFIC && printf('<- 0x%04x %s', segment.opcode, segment.data.toString("hex"));
 		switch(segment.opcode) {
-			case 0x00f1: // SingleAbility
-				LOG_ABILITIES && printf('SingleAbility %s', segment.data.toString("hex"));
+			case OP_ABILITY_1:
+				LOG_ABILITIES && printf('Ability1 %s', segment.data.toString("hex"));
 				var result = parseAbility(segment, segment.data);
 				handleAbility([result])
 				break;
-			case 0x00f4: // AreaAbility
-				LOG_ABILITIES && printf('AreaAbility %s', segment.data.toString("hex"));
+			case OP_ABILITY_8:
+				LOG_ABILITIES && printf('Ability8 %s', segment.data.toString("hex"));
 				var result = parseAreaAbility(segment, segment.data);
 				handleAbility(result)
 				break;
+			case 0x0065: // Chat
+				/*printf('Chat %s', segment.data.toString("hex"));
+				let code = segment.data.readUInt16LE(4);
+				let name = parseCStr(segment.data.slice(21, 52));
+				let message = parseCStr(segment.data.slice(53));
+				printf('%d: <%s> %s', name, message);*/
 		}
 		
 	}
@@ -62,7 +78,7 @@ function handleAbility(results) {
 
 		result.effects.forEach((effect, idx) => {
 			let type = effect.data1 & 0xff;
-			let value = effect.data2 & 0xffff;
+			let value = effect.data2 >>> 16;
 			let effectType = EffectType.none;
 
 			switch(type) {
@@ -99,8 +115,9 @@ function handleAbility(results) {
 			switch(effectType) {
 				case EffectType.damage:
 				case EffectType.healing:
-					if((effect.data2 & 0x4000000) != 0)
-						value *= 10;
+					// todo: fix this bit
+					//if((effect.data2 & 0x4000000) != 0)
+					//	value *= 10;
 					
 					let shr = effectType != EffectType.healing ? 8 : 16;
 					let critical = (effect.data1 >>> shr & 0x1) != 0;
@@ -225,9 +242,9 @@ function parseAreaAbility(segment, data) {
 function parseAbility(segment, data) {
 	let result = {
 		source: segment.source,
-		action: data.readUInt16LE(8),
-		effects: data.slice(40, 106),
-		target: data.readUInt32LE(106),
+		action: data.readUInt16LE(0x08),
+		effects: data.slice(0x28, 0x6a),
+		target: data.readUInt32LE(0x6a),
 	};
 
 	result.effects = parseEffects(result.effects);
