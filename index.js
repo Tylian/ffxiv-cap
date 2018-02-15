@@ -3,7 +3,7 @@ const EXD = require('./lib/EXD');
 const Capture = require('./lib/Capture');
 const FFXIV = require('./lib/FFXIV');
 
-const LOG_TRAFFIC = false;
+const LOG_TRAFFIC = true;
 const LOG_ABILITIES = true;
 
 const OP_ABILITY_1  = 0x0128;
@@ -27,10 +27,11 @@ function parseCStr(buffer) {
 	return buffer.slice(0, buffer.indexOf(0)).toString('utf8');
 }
 
-const cap = new Capture('', [55000, 55999]);
+const cap = new Capture(null, [55000, 55999]);
 cap.on('incoming', data => {
 	let packet = FFXIV.parseContainer(data);
 	if(packet == undefined) return;
+	console.log('inc data!');
 	for(let segment of packet.segments) {
 		if(segment.type != 3) continue;
 		LOG_TRAFFIC && printf('<- 0x%04x %s', segment.opcode, segment.data.toString("hex"));
@@ -45,14 +46,7 @@ cap.on('incoming', data => {
 				var result = parseAreaAbility(segment, segment.data);
 				handleAbility(result)
 				break;
-			case 0x0065: // Chat
-				/*printf('Chat %s', segment.data.toString("hex"));
-				let code = segment.data.readUInt16LE(4);
-				let name = parseCStr(segment.data.slice(21, 52));
-				let message = parseCStr(segment.data.slice(53));
-				printf('%d: <%s> %s', name, message);*/
 		}
-		
 	}
 });
 cap.on('outgoing', data => {
