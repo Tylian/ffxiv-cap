@@ -16,4 +16,4 @@ node_modules/
 .vscode
 
 # EXD files (Extract them yourself!)
-exd/*.csv
+exd/*

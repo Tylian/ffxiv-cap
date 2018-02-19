@@ -3,14 +3,15 @@ const EXD = require('./lib/EXD');
 const Capture = require('./lib/Capture');
 const FFXIV = require('./lib/FFXIV');
 
-const LOG_TRAFFIC = true;
-const LOG_ABILITIES = true;
+const LOG_TRAFFIC = false;
+const LOG_ABILITIES = false;
 
-const OP_ABILITY_1  = 0x0128;
-const OP_ABILITY_8  = 0x012b;
-const OP_ABILITY_16 = 0x0138;
-const OP_ABILITY_24 = 0x0139;
-const OP_ABILITY_32 = 0x013a;
+const OP_ABILITY_1   = 0x0128;
+const OP_ABILITY_8   = 0x012b;
+const OP_ABILITY_16  = 0x0138;
+const OP_ABILITY_24  = 0x0139;
+const OP_ABILITY_32  = 0x013a;
+const OP_ACTOR_GAUGE = 0x027d;
 
 let EffectType = ["none", "damage", "healing", "addStatus", "resistStatus", "unaffectStatus", "gainGauge", "gainTP", "gainMP", "enmity", "gainGP"];
 EffectType.forEach((e,i) => { EffectType[e] = i });
@@ -22,6 +23,7 @@ function printf(format, ...argv) {
 console.log('Precaching EXDs...');
 EXD.getCache('action');
 EXD.getCache('status');
+EXD.getCache('classjob');
 
 function parseCStr(buffer) {
 	return buffer.slice(0, buffer.indexOf(0)).toString('utf8');
@@ -31,7 +33,6 @@ const cap = new Capture(null, [55000, 55999]);
 cap.on('incoming', data => {
 	let packet = FFXIV.parseContainer(data);
 	if(packet == undefined) return;
-	console.log('inc data!');
 	for(let segment of packet.segments) {
 		if(segment.type != 3) continue;
 		LOG_TRAFFIC && printf('<- 0x%04x %s', segment.opcode, segment.data.toString("hex"));
@@ -45,6 +46,11 @@ cap.on('incoming', data => {
 				LOG_ABILITIES && printf('Ability8 %s', segment.data.toString("hex"));
 				var result = parseAreaAbility(segment, segment.data);
 				handleAbility(result)
+				break;
+			case OP_ACTOR_GAUGE:
+				printf('Gauge %s', segment.data.toString("hex"));
+				var result = parseGauge(segment, segment.data);
+				handleGauge(result);
 				break;
 		}
 	}
@@ -65,6 +71,24 @@ cap.on('outgoing', data => {
 console.log("Ready!");
 
 // ----------------------------------------------------------------------------
+
+function handleGauge(result) {
+	let job = EXD.getValue('classjob', result.job);
+	let message = sprintf("%d / %d", result.data1, result.data2);
+	switch(result.job) {
+		// todo: other classes
+		case "samurai":
+			// todo: sen
+			message = sprintf("%d Kenki / %d", result.data1, result.data2);
+			break;
+		case "red mage":
+			message = sprintf("%d White Mana / %d Black Mana", result.data1, result.data2);
+			break;
+		
+	}
+
+	printf("%s: %s", job, message)
+}
 
 function handleAbility(results) {
 	results.forEach(result => {
@@ -102,22 +126,20 @@ function handleAbility(results) {
 					break;
 				case 51:
 					effectType = EffectType.resistStatus; break;
-				case 58: // Gauge update
+				case 59: // Gauge update
 					effectType = EffectType.gainGauge; break;
 			}
 
 			switch(effectType) {
 				case EffectType.damage:
 				case EffectType.healing:
-					// todo: fix this bit
-					//if((effect.data2 & 0x4000000) != 0)
-					//	value *= 10;
-					
+					value += 0xffff * effect.data2 & 0x0f;
+
 					let shr = effectType != EffectType.healing ? 8 : 16;
 					let critical = (effect.data1 >>> shr & 0x1) != 0;
 					let direct = (effect.data1 >>> shr & 0x2) != 0;
 
-					if(value == 0 && type == 1) {
+					if(value == 0 && effectType == 1) {
 						printf("The attack misses!");
 						break;
 					}
@@ -149,8 +171,8 @@ function handleAbility(results) {
 					printf(messages[effectType] + (critRate > 0 ? " (Critical Rate: %.1f%%)" : ""), EXD.getValue('status', value), critRate);
 					break;
 				case EffectType.gainGauge:
-					let gain1 = effect.data1 >> 8 & 0xFF;
-					let gain2 = effect.data1 >> 16 & 0xFF;
+					let gain1 = effect.data1 >> 8 & 0xff;
+					let gain2 = effect.data1 >> 16 & 0xff;
 					switch(value) {
 						case 0xba: // Balance Gauge
 						case 0xbb: // (Manafication??)
@@ -174,7 +196,7 @@ function handleAbility(results) {
 								0xaf: "Draw: %s",
 								0xb2: "Redraw: %s",
 								0xb0: "Stored %s in Spread",
-								0xb3: " Minor Arcana: %s",
+								0xb3: "Minor Arcana: %s",
 							};
 
 							printf(drawMessage[gaugeType], cards[gain1]);
@@ -242,5 +264,15 @@ function parseAbility(segment, data) {
 	};
 
 	result.effects = parseEffects(result.effects);
+	return result;
+}
+
+function parseGauge(segment, data) {
+	let result = {
+		job: data.readUInt8(0x00),
+		data1: data.readUInt8(0x01),
+		data2: data.readUInt8(0x02)
+	};
+
 	return result;
 }
