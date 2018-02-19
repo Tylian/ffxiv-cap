@@ -139,7 +139,7 @@ function handleAbility(results) {
 					let critical = (effect.data1 >>> shr & 0x1) != 0;
 					let direct = (effect.data1 >>> shr & 0x2) != 0;
 
-					if(value == 0 && effectType == 1) {
+					if(value == 0 && type == 1) {
 						printf("The attack misses!");
 						break;
 					}
