@@ -5,6 +5,7 @@ const FFXIV = require('./lib/FFXIV');
 
 const LOG_TRAFFIC = false;
 const LOG_ABILITIES = false;
+const LOG_GAUGE = false;
 
 const OP_ABILITY_1   = 0x0128;
 const OP_ABILITY_8   = 0x012b;
@@ -12,6 +13,9 @@ const OP_ABILITY_16  = 0x0138;
 const OP_ABILITY_24  = 0x0139;
 const OP_ABILITY_32  = 0x013a;
 const OP_ACTOR_GAUGE = 0x027d;
+
+const CARDS = ["None", "The Balance", "The Bole", "The Arrow", "The Spear", "The Ewer", "The Spire", "Lord of Crowns", "Lady of Crowns"];
+const ROYAL_ROAD = ["Empty", "Enhanced", "Extended", "Expanded"];
 
 let EffectType = ["none", "damage", "healing", "addStatus", "resistStatus", "unaffectStatus", "gainGauge", "gainTP", "gainMP", "enmity", "gainGP"];
 EffectType.forEach((e,i) => { EffectType[e] = i });
@@ -40,17 +44,16 @@ cap.on('incoming', data => {
 			case OP_ABILITY_1:
 				LOG_ABILITIES && printf('Ability1 %s', segment.data.toString("hex"));
 				var result = parseAbility(segment, segment.data);
-				handleAbility([result])
+				LOG_ABILITIES && handleAbility([result])
 				break;
 			case OP_ABILITY_8:
 				LOG_ABILITIES && printf('Ability8 %s', segment.data.toString("hex"));
 				var result = parseAreaAbility(segment, segment.data);
-				handleAbility(result)
+				LOG_ABILITIES && handleAbility(result)
 				break;
 			case OP_ACTOR_GAUGE:
-				printf('Gauge %s', segment.data.toString("hex"));
 				var result = parseGauge(segment, segment.data);
-				handleGauge(result);
+				LOG_GAUGE && handleGauge(result);
 				break;
 		}
 	}
@@ -74,20 +77,11 @@ console.log("Ready!");
 
 function handleGauge(result) {
 	let job = EXD.getValue('classjob', result.job);
-	let message = sprintf("%d / %d", result.data1, result.data2);
-	switch(result.job) {
-		// todo: other classes
-		case "samurai":
-			// todo: sen
-			message = sprintf("%d Kenki / %d", result.data1, result.data2);
-			break;
-		case "red mage":
-			message = sprintf("%d White Mana / %d Black Mana", result.data1, result.data2);
-			break;
-		
-	}
+	let message = result.data.toString('hex');
+	let gauge = result.gauge;
 
 	printf("%s: %s", job, message)
+	console.log(JSON.stringify(gauge, null, "  "));
 }
 
 function handleAbility(results) {
@@ -191,7 +185,6 @@ function handleAbility(results) {
 						case 0xb2: // Redraw
 						case 0xb3: // Minor Arcana
 						case 0xb0: // Spread
-							let cards = ["", "The Balance", "The Bole", "The Arrow", "The Spear", "The Ewer", "The Spire", "Lord of Crowns", "Lady of Crowns"];
 							const drawMessage = {
 								0xaf: "Draw: %s",
 								0xb2: "Redraw: %s",
@@ -199,7 +192,7 @@ function handleAbility(results) {
 								0xb3: "Minor Arcana: %s",
 							};
 
-							printf(drawMessage[gaugeType], cards[gain1]);
+							printf(drawMessage[value], CARDS[gain1]);
 							break;
 						case 0xb4: // Sleeve Draw [no data :(]
 						case 0xdf: // Undraw
@@ -270,9 +263,81 @@ function parseAbility(segment, data) {
 function parseGauge(segment, data) {
 	let result = {
 		job: data.readUInt8(0x00),
-		data1: data.readUInt8(0x01),
-		data2: data.readUInt8(0x02)
+		data: data.slice(0x01),
 	};
 
+	let gauge = {};
+	switch(result.job) {
+		case 0x13: // paladin
+			gauge.oath = data.readUInt8(0x01);
+			break;
+		case 0x14: // monk
+			gauge.chakra = data.readUInt8(0x04);
+			gauge.greasedLightning = data.readUInt8(0x03);
+			gauge.duration = data.readUInt16LE(0x01) / 1000;
+			break;
+		case 0x15: // warrior
+			gauge.beast = data.readUInt8(0x01);
+			break;
+		case 0x16: // dragoon
+			gauge.dragon = data.readUInt8(0x03);
+			gauge.gaze = data.readUInt8(0x04);
+			gauge.duration = data.readUInt16LE(0x01) / 1000;
+			break;
+		case 0x17: // bard
+			gauge.song = data.readUInt8(0x04) & 0x03;
+			gauge.lastSong = (data.readUInt8(0x04) >>> 2) & 0x03;
+			gauge.stacks = data.readUInt8(0x03);
+			break;
+		case 0x18: // white mage
+			break;
+		case 0x19: // black mage
+			gauge.stacks = data.readInt8(0x05);
+			gauge.enochian = data.readUInt8(0x07) == 0x01;
+			gauge.umbralHeart = data.readUInt8(0x06);
+			gauge.duration = data.readUInt16LE(0x03) / 1000;
+			break;
+		case 0x1a: // arcanist?
+			break;
+		case 0x1b: // summoner
+			gauge.aetherflow = data.readUInt8(0x05) & 0x03;
+			gauge.aethertrail = (data.readUInt8(0x05) >> 2) & 0x03;
+			gauge.dreadwyrmAether = (data.readUInt8(0x05) >> 4) & 0x03;
+			// todo: gauge.dreadwyrmTrace = ???
+			gauge.bahamut = data.readUInt8(0x03) == 0x05;
+			gauge.duration = data.readUInt16LE(0x01) / 1000;
+			break;
+		case 0x1c: // scholar
+			gauge.aetherflow = data.readUInt8(0x05) & 0x03;
+			guage.fairy = data.readUInt8(0x06);
+			break;
+		case 0x1d: // rogue?
+			break;
+		case 0x1e: // ninja
+			gauge.huton = data.readUInt32LE(0x01);
+			break;
+		case 0x1f: // machinist
+			break;
+		case 0x20: // dark knight
+			break;
+		case 0x21: // astrologian
+			gauge.drawn = data.readUInt8(0x05) & 0xf;
+			gauge.held = data.readUInt8(0x05) >>> 4 & 0xf;
+			gauge.royalRoad = data.readUInt8(0x06) >>> 4 & 0xf;
+			gauge.minorArcana = data.readUInt8(0x06) & 0xf;
+			break;
+		case 0x22: // samurai
+			let sen = data.readUInt8(0x02);
+			gauge.kenki = data.readUInt8(0x01);
+			gauge.setsu = (sen & 0x01) == 0x01;
+			gauge.getsu = (sen & 0x02) == 0x02;
+			gauge.ka = (sen & 0x04) == 0x04;
+		case 0x23: // red mage
+			gauge.blackMana = result.data[0];
+			gauge.whiteMana = result.data[1];
+			break;
+	}
+
+	result.gauge = gauge;
 	return result;
 }
